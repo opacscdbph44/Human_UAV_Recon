@@ -1,0 +1,65 @@
+{
+    "todo-tree.tree.scanMode": "workspace only",
+    "python.analysis.extraPaths": [
+        "E:\\Github\\MyBase\\Human_UAV_Recon"
+    ],
+    "terminal.integrated.env.windows":{
+        "PYTHONPATH":"${workspaceFolder};E:\\Github\\MyBase\\Human_UAV_Recon"
+    },
+    "cSpell.ignorePaths": [
+        "package-lock.json",
+        "node_modules",
+        "vscode-extension",
+        ".git/objects",
+        ".vscode/**",
+        ".vscode-insiders",
+        "**/node_modules/**",
+        "**/vscode-extension/**",
+        "**/.git/**",
+        ".vscode",
+        "typings",
+        "**/typeshed-fallback/**"
+    ],
+    "workbench.editor.wrapTabs": true,
+    "cSpell.words": [
+        "ALNSNSGAII",
+        "consr",
+        "IISLB",
+        "IISQ",
+        "IISUB",
+        "labelbottom",
+        "Makespan",
+        "newaxis",
+        "qconstraint",
+        "QCRHS"
+    ],
+    "terminal.integrated.cwd": "${workspaceFolder}",//新打开的父终端，直接跳转到当前打开文件夹的目录
+    "terminal.integrated.splitCwd": "initial", //split的子终端继承父终端工作目录
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "python.pythonPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.venvPath": "${workspaceFolder}",
+    "python.envFile": "${workspaceFolder}/.env",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell (Venv)": {
+            "source": "PowerShell",
+            "args": ["-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "& '${workspaceFolder}\\.venv\\Scripts\\Activate.ps1'"]
+        }
+    },
+    "terminal.integrated.defaultProfile.windows": "PowerShell (Venv)",
+    
+    // MyPy configuration for VS Code
+    "mypy-type-checker.importStrategy": "fromEnvironment",
+    "mypy-type-checker.args": [
+        "--config-file=mypy.ini",
+        "--no-incremental",
+        "--cache-dir=.mypy_cache"
+    ],
+    "mypy-type-checker.severity": {
+        "error": "Error",
+        "note": "Information"
+    },
+    "python.linting.mypyEnabled": false,  // Disable built-in mypy to avoid conflicts
+    "python.analysis.typeCheckingMode": "basic"
+}

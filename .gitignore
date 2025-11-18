@@ -1,0 +1,15 @@
+/data
+/.mypy_cache
+/result
+/log
+/__pycache__/
+/.venv
+backup_data
+backup_result
+gurobi_models
+*.gif
+*.lp
+*.log
+*.rlp
+*.pyc
+/instances
