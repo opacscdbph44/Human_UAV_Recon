@@ -24,15 +24,5 @@
                 "PYTHONPATH": "${workspaceFolder}"
             }
         },
-        {
-            "name": "Python 调试程序: sol_and_pop_funcs_test.py",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/test/sol_and_pop_funcs_test.py",
-            "console": "integratedTerminal",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            }
-        }
     ]
 }

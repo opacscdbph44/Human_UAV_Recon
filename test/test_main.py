@@ -10,13 +10,11 @@ from src.config import (
     InstanceParam,
 )
 from src.element import Solution
-from src.evaluator import Population
 from src.solver import Solver_Name, solve
 from src.utils import (
     load_instance,
     plot_instance,
     query_result_folder,
-    save_population_results,
     save_solution,
 )
 
@@ -42,9 +40,10 @@ def main(
         instance_param=InstanceParam(
             name="a280.tsp",
             demand_num=demand_num,
+            max_visit_time=50,
         ),
         algorithm_config=AlgorithmConfig(
-            max_iter=200,
+            max_iter=1000,
         ),
         random_seed=random_seed,
     )
@@ -110,22 +109,6 @@ def main(
                 solution,
                 folder_path=result_folder,
             )
-
-    elif isinstance(solve_result, Population):
-        population = solve_result
-        print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"获得群解求解结果,种群规模: {population.size}"
-        )
-        # 查找结果存储文件夹
-        if SAVE_RESULT_JSON:
-            if json_folder is not None:
-                result_folder = Path(json_folder)
-            else:
-                result_folder = query_result_folder(prob_config, solver_name.value)
-
-            # 存储结果
-            save_population_results(population, result_folder)
     else:
         raise TypeError(f"求解结果类型错误！{type(solve_result)}")
 
@@ -144,14 +127,14 @@ if __name__ == "__main__":
         # 2025,
     ]:
         for solver_name in [
-            # Solver_Name.GUROBI_EPSILON_CONS,
-            # Solver_Name.GREEDY_RANDOMIZED_HEURI,
-            # Solver_Name.BASIC_NSGA_II,
-            Solver_Name.NSGA_II,
-            Solver_Name.NSGA_II_n,
-            Solver_Name.ALNS_NSGA_II,
-            Solver_Name.ALNS_NSGA_II_n,
-            Solver_Name.MOEAD,
+            # Solver_Name.GUROBI_SINGLE_OBJ,
+            Solver_Name.ALNS,
+            Solver_Name.MS_ALNS,
+            # Solver_Name.RANDOMIZED_GREEDY,
+            # Solver_Name.EFFICIENT_GREEDY,
+            # Solver_Name.GROUND_FIRST_GREEDY,
+            # Solver_Name.DRONE_FIRST_GREEDY,
+            # Solver_Name.DISTANCE_GUIDED_GREEDY,
         ]:
             figure_folder = ""
             for scale in [
@@ -161,16 +144,20 @@ if __name__ == "__main__":
                 8,
                 9,
                 10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
                 20,
                 30,
                 40,
                 50,
-                60,
-                70,
-                80,
-                90,
                 100,
-                200,
             ]:
                 main(
                     solver_name,

@@ -13,3 +13,5 @@ gurobi_models
 *.rlp
 *.pyc
 /instances
+/result_compare
+/docs

@@ -4,7 +4,6 @@ from pathlib import Path
 
 from src.config import Config
 from src.element import InstanceClass, Solution
-from src.evaluator import Evaluator, Population
 from src.utils.ins_create import create_by_tsp
 
 
@@ -37,9 +36,8 @@ def load_instance(prob_config: Config, file_path: str = ""):
             # 将保存的配置字典转换为Config对象
             saved_config = Config.from_dict(saved_config_dict)
 
-            # 比较配置是否一致
-            if saved_config == prob_config:
-                # 配置一致，加载算例实例对象并返回
+            if saved_config.instance_param == prob_config.instance_param:
+                # 问题参数一致,加载算例实例对象并返回
                 matched_files.append((json_file, saved_instance_dict))
 
     # 如果找到匹配文件，则根据读取数据返回算例实例对象
@@ -54,10 +52,11 @@ def load_instance(prob_config: Config, file_path: str = ""):
         else:
             print(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-                f"找到匹配的算例文件: {matched_files[0][0]}"
+                f"✓✓✓ 找到匹配的算例文件: {matched_files[0][0]}"
             )
 
         instance = InstanceClass.from_dict(matched_files[0][1])
+        instance.prob_config = prob_config  # 更新为当前配置
         print(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
             f"成功建立算例对象: {instance}"
@@ -68,7 +67,7 @@ def load_instance(prob_config: Config, file_path: str = ""):
     # 否则，读取tsp文件，生成算例实例对象并返回
     print(
         f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}:"
-        "未找到匹配的成品算例文件，正在从原始tsp文件生成新算例..."
+        "××× 未找到匹配的成品算例文件，正在从原始tsp文件生成新算例..."
     )
 
     # 读取.tsp文件，生成算例对象
@@ -96,11 +95,8 @@ def query_instance_folder(prob_config: Config) -> Path:
     if instance_name.endswith(".tsp"):
         instance_folder_name = "TSPLIB-" + instance_name[:-4]
     demand_num = prob_config.instance_param.demand_num
-    steiner_num = prob_config.instance_param.steiner_num
 
-    folder_path = Path(
-        f"data/Instances/{instance_folder_name}/D{demand_num}_S{steiner_num}/"
-    )
+    folder_path = Path(f"data/Instances/{instance_folder_name}/D{demand_num}/")
 
     # 检查路径是否存在,不存在则创建
     if not folder_path.exists():
@@ -127,11 +123,8 @@ def query_result_folder(
     if instance_name.endswith(".tsp"):
         instance_folder_name = "TSPLIB-" + instance_name[:-4]
     demand_num = prob_config.instance_param.demand_num
-    steiner_num = prob_config.instance_param.steiner_num
 
-    folder_path = Path(
-        f"result/{instance_folder_name}/D{demand_num}_S{steiner_num}/{solver_name}/"
-    )
+    folder_path = Path(f"result/{instance_folder_name}/D{demand_num}/{solver_name}/")
 
     # 检查路径是否存在,不存在则创建
     if not folder_path.exists():
@@ -162,56 +155,16 @@ def save_solution(
     )
 
 
-def save_population_results(
-    population: Population,
-    folder_path: Path | None = None,
-) -> None:
-    """保存种群结果到指定文件
-
-    Args:
-        population (Population): 需要保存的种群对象
-        folder_path (Path): 结果保存的文件夹路径
-    """
-    current_date_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if folder_path is None:
-        folder_path = Path("result/") / current_date_time
-
-    # 创建文件夹(如果不存在)
-    if not folder_path.exists():
-        folder_path.mkdir(parents=True, exist_ok=True)
-
-    # 保存为 JSON 格式
-    file_path = folder_path / f"population_results_{current_date_time}.json"
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        population_data = {
-            "timestamp": current_date_time,
-            "pop_size": population.size,
-            "solver_name": population.solver_name,
-            "solve_time": population.solve_time,
-            "solutions": [sol.to_dict() for sol in population.solutions],
-            "hv_history": population.hv_history,
-        }
-        json.dump(population_data, f, indent=2, ensure_ascii=False)
-
-    print(
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-        f"成功保存种群结果到文件: {file_path}"
-    )
-
-
-def load_population_results(
-    instance: InstanceClass,
-    solver_name: str,
+def load_solution(
     file_path: Path,
-) -> Population:
-    """从指定文件夹加载种群结果
+) -> Solution:
+    """从指定文件夹加载单个解结果
 
     Args:
         file_path (Path): 结果保存的文件夹路径
 
     Returns:
-        Population: 加载的种群对象
+        Solution: 加载的解对象
     """
     if not file_path.exists():
         raise FileNotFoundError(f"指定的结果文件夹不存在: {file_path}")
@@ -221,28 +174,28 @@ def load_population_results(
         raise ValueError(f"指定的路径不是文件夹: {file_path}")
 
     # 查找所有 JSON 文件
-    json_files = list(file_path.glob("population_results_*.json"))
+    json_files = list(file_path.glob("solution_result_*.json"))
 
     # 检查文件数量
     if len(json_files) == 0:
-        raise FileNotFoundError(f"指定的文件夹中没有找到种群结果文件: {file_path}")
+        raise FileNotFoundError(f"指定的文件夹中没有找到解结果文件: {file_path}")
     elif len(json_files) > 1:
         # 打印所有候选文件
         print(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"在文件夹中找到{len(json_files)}个种群结果文件:"
+            f"在文件夹中找到{len(json_files)}个解结果文件:"
         )
         for json_file in json_files:
             print(f"  - {json_file.name}")
 
         # 从文件名中提取时间戳并排序,选择最新的文件
-        # 文件名格式: population_results_20251024_021756.json
+        # 文件名格式: solution_result_20251024_021756.json
         def extract_timestamp(file_path: Path) -> datetime:
             # 仅在文件数量大于1时使用，用于从文件名提取时间戳
             try:
                 # 提取文件名中的时间戳部分
                 name = file_path.stem  # 去掉.json后缀
-                timestamp_str = name.replace("population_results_", "")
+                timestamp_str = name.replace("solution_result_", "")
                 # 转换为datetime对象进行比较
                 return datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
             except Exception as e:
@@ -263,78 +216,19 @@ def load_population_results(
         result_file = json_files[0]
         print(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"找到唯一的种群结果文件: {result_file.name}"
+            f"找到唯一的解结果文件: {result_file.name}"
         )
 
     with open(result_file, "r", encoding="utf-8") as file_handle:
-        population_data = json.load(file_handle)
+        solution_data = json.load(file_handle)
 
-    # 读取solutions字段
-    solutions = [
-        Solution.from_dict(sol_dict) for sol_dict in population_data["solutions"]
-    ]
+    # 读取solution字段并转换为Solution对象
+    solution = Solution.from_dict(solution_data)
 
-    pop_size = len(solutions)
-    population = Population(
-        size=pop_size,
-        solver_name=solver_name,
-        evaluator=Evaluator(instance),
+    print(
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
+        f"成功加载解结果: 求解器={solution.Solver_name}, "
+        f"求解时间={solution.solve_time:.2f}s"
     )
-    population.solutions = solutions
 
-    # 读取timestamp字段
-    if "timestamp" not in population_data:
-        print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"[warning] 文件中没有找到 'timestamp' 字段"
-        )
-
-    # 读取pop_size字段
-    if "pop_size" in population_data:
-        saved_pop_size = population_data["pop_size"]
-        if saved_pop_size != pop_size:
-            print(
-                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-                f"[warning] 保存的种群大小({saved_pop_size})与实际解数量({pop_size})不一致"
-            )
-    else:
-        print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"[warning] 文件中没有找到 'pop_size' 字段"
-        )
-
-    # 读取solver_name字段
-    if "solver_name" in population_data:
-        saved_solver_name = population_data["solver_name"]
-        if saved_solver_name != solver_name:
-            print(
-                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-                f"[warning] 保存的求解器名称({saved_solver_name})"
-                f"与当前求解器({solver_name})不一致"
-            )
-        population.solver_name = saved_solver_name
-    else:
-        print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"[warning] 文件中没有找到 'solver_name' 字段"
-        )
-
-    # 读取solve_time字段
-    if "solve_time" in population_data:
-        population.solve_time = population_data["solve_time"]
-    else:
-        print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"[warning] 文件中没有找到 'solve_time' 字段"
-        )
-
-    # 读取hv_history字段
-    if "hv_history" in population_data:
-        population.hv_history = population_data["hv_history"]
-    else:
-        print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: "
-            f"[warning] 文件中没有找到 'hv_history' 字段"
-        )
-
-    return population
+    return solution

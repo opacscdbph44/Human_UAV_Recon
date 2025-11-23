@@ -23,12 +23,6 @@ class DistribType(str, Enum):
     UNDEFINED = "Undefined"
 
 
-class SteinerGenerationMode(str, Enum):
-    KMEANS = "kmeans"
-    GRID = "grid"
-    ASSIGN = "assign"
-
-
 class OptimizeSense(str, Enum):
     MINIMIZE = "minimize"
     MAXIMIZE = "maximize"
@@ -37,6 +31,15 @@ class OptimizeSense(str, Enum):
 class CoolingStrategy(str, Enum):
     LINEAR = "linear"
     EXPONENTIAL = "exponential"
+
+
+class GroupingMethod(str, Enum):
+    """需求点分组方式"""
+
+    NONE = "none"  # 不分组
+    KMEANS = "kmeans"  # K-means聚类
+    GRID = "grid"  # 网格分组
+    DISTANCE = "distance"  # 基于距离阈值分组
 
 
 # ==================== 基础类 ====================
@@ -66,16 +69,16 @@ class BaseConfig:
 class VehicleConfig(BaseConfig):
     """车辆参数配置"""
 
-    ground_veh_speed: float = 10.0
+    ground_veh_speed: float = 50.0
     drone_speed: float = 20.0
     ground_veh_travel_power_rate: float = 0.1
     ground_veh_comm_power_rate: float = 0.01
     drone_travel_power_rate: float = 0.05
     drone_comm_power_rate: float = 0.005
-    ground_veh_energy_capacity: float = 1000.0
-    drone_energy_capacity: float = 200.0
-    ground_veh_comm_radius: float = 50.0
-    drone_comm_radius: float = 30.0
+    ground_veh_range: float = 5000.0
+    drone_range: float = 1000.0
+    ground_veh_comm_radius: float = 0.0
+    drone_comm_radius: float = 50.0
 
     @classmethod
     def from_dict(cls, data: dict) -> "VehicleConfig":
@@ -96,8 +99,8 @@ class VehicleConfig(BaseConfig):
                 self.ground_veh_comm_power_rate,
                 self.drone_travel_power_rate,
                 self.drone_comm_power_rate,
-                self.ground_veh_energy_capacity,
-                self.drone_energy_capacity,
+                self.ground_veh_range,
+                self.drone_range,
             ]
         ):
             raise ValueError("Power rates and energy capacity must be positive")
@@ -123,14 +126,18 @@ class InstanceParam(BaseConfig):
     ground_veh_num: int = 2
     drone_num: int = 2
     vehicle_config: VehicleConfig = field(default_factory=VehicleConfig)
-    steiner_num: int = 4
-    steiner_generation_mode: SteinerGenerationMode = SteinerGenerationMode.GRID
-    steiner_grid_size: Tuple[int, int] = (2, 2)
-    steiner_coords: List[Tuple[float, float]] = field(
-        default_factory=lambda: [(0.2, 0.2), (0.5, 0.5), (0.8, 0.8), (0.5, 0.8)]
-    )
     min_success_task_rate: float = 0.0
-    min_comm_time: float = 19.0
+    min_visit_time: float = 19.0
+    max_visit_time: float = 100.0  # 默认统一的最晚访问时间
+    max_visit_time_range: Tuple[float, float] | None = (
+        None  # 如果设置,则按此区间随机生成
+    )
+    # 分组相关参数
+    grouping_method: GroupingMethod = GroupingMethod.KMEANS
+    max_group_demand: int = 4  # 每个组最大的个体数
+    num_groups: int = 0  # 分组数量（用于kmeans和grid）
+    distance_threshold: float = 100.0  # 距离阈值（用于distance方法）
+    grid_size: Tuple[int, int] = (3, 3)  # 网格尺寸（用于grid方法）
 
     @classmethod
     def from_dict(cls, data: dict) -> "InstanceParam":
@@ -144,9 +151,11 @@ class InstanceParam(BaseConfig):
             "isolate_ratio",
             "ground_veh_num",
             "drone_num",
-            "steiner_num",
             "min_success_task_rate",
-            "min_comm_time",
+            "min_visit_time",
+            "max_visit_time",
+            "num_groups",
+            "distance_threshold",
         ]
         for field_name in simple_fields:
             if field_name in data:
@@ -159,22 +168,20 @@ class InstanceParam(BaseConfig):
             kwargs["demand_selection"] = DemandSelection(data["demand_selection"])
         if "distrib_type" in data:
             kwargs["distrib_type"] = DistribType(data["distrib_type"])
-        if "steiner_generation_mode" in data:
-            kwargs["steiner_generation_mode"] = SteinerGenerationMode(
-                data["steiner_generation_mode"]
-            )
+        if "grouping_method" in data:
+            kwargs["grouping_method"] = GroupingMethod(data["grouping_method"])
 
         # 处理 Tuple 字段
         if "distrib_center" in data:
             kwargs["distrib_center"] = tuple(data["distrib_center"])
-        if "steiner_grid_size" in data:
-            kwargs["steiner_grid_size"] = tuple(data["steiner_grid_size"])
+        if "grid_size" in data:
+            kwargs["grid_size"] = tuple(data["grid_size"])
+        if "max_visit_time_range" in data and data["max_visit_time_range"] is not None:
+            kwargs["max_visit_time_range"] = tuple(data["max_visit_time_range"])
 
         # 处理 List[Tuple] 字段
         if "base_select_param" in data:
             kwargs["base_select_param"] = [tuple(x) for x in data["base_select_param"]]
-        if "steiner_coords" in data:
-            kwargs["steiner_coords"] = [tuple(x) for x in data["steiner_coords"]]
 
         # 处理嵌套对象
         if "vehicle_config" in data:
@@ -187,8 +194,17 @@ class InstanceParam(BaseConfig):
             raise ValueError("base_num and demand_num must be positive")
         if not 0 <= self.isolate_ratio <= 1 or not 0 <= self.min_success_task_rate <= 1:
             raise ValueError("Ratios must be in [0, 1]")
-        if self.min_comm_time < 0:
+        if self.min_visit_time < 0:
             raise ValueError("min_comm_time must be non-negative")
+        if self.max_visit_time < 0:
+            raise ValueError("max_visit_time must be non-negative")
+        if self.max_visit_time_range is not None:
+            if len(self.max_visit_time_range) != 2:
+                raise ValueError("max_visit_time_range must be a tuple of (min, max)")
+            if self.max_visit_time_range[0] < 0 or self.max_visit_time_range[1] < 0:
+                raise ValueError("max_visit_time_range values must be non-negative")
+            if self.max_visit_time_range[0] > self.max_visit_time_range[1]:
+                raise ValueError("max_visit_time_range min must be <= max")
         if not self.name.endswith(".tsp"):
             raise ValueError("name must end with .tsp")
         if (
@@ -196,11 +212,6 @@ class InstanceParam(BaseConfig):
             and not self.base_select_param
         ):
             raise ValueError("base_select_param required for assign mode")
-        if (
-            self.steiner_generation_mode == SteinerGenerationMode.ASSIGN
-            and len(self.steiner_coords) < self.steiner_num
-        ):
-            raise ValueError("Insufficient steiner_coords for assign mode")
         if self.ground_veh_num == 0 and self.drone_num == 0:
             raise ValueError("At least one vehicle type required")
 
@@ -233,36 +244,27 @@ class ObjConfig(BaseConfig):
 class AlgorithmConfig(BaseConfig):
     """算法参数配置"""
 
-    # 目标函数优先级
-    makespan_priority: int = 0
-    score_priority: int = 1
     # 目标函数参数类
     obj_config: ObjConfig = field(default_factory=ObjConfig)
 
     # epsilon点数
-    num_epsilon_points: int = 10
-    time_limit: int = 1000
+    time_limit: int = 3600
     big_m: float = 1e6
-    max_iter: int = 200
-    pop_size: int = 100
+    max_iter: int = 1000
+    enable_early_stop: bool = True
+    max_not_improve_iter: int = 1000
+    early_stop_threshold: float = 1e-5
     crossover_prob: float = 0.9
     mutation_prob: float = 0.1
     alns_max_iter: int = 1000
     alns_segment_size: int = 1
     destroy_degree_min: float = 0.1
     destroy_degree_max: float = 0.4
-    alns_initial_temp: float = 100.0
-    alns_cooling_rate: float = 0.95
-    alns_final_temp: float = 0.1
-    alns_tabu_tenure: int = 0
-    alns_operator_score_decay_rate: float = 0.8
-    cooling_strategy: CoolingStrategy = CoolingStrategy.EXPONENTIAL
-    alns_enable_tabu: bool = True
-    alns_iters_per_offspring: int = 1
-    enable_alns_improvement: bool = True
-    enable_hv_early_stopping: bool = True
-    hv_improvement_threshold: float = 1e-5
-    hv_stagnation_limit: int = 50
+    decay_rate: float = 0.9
+    multi_start_num: int = 4
+    pheromone_evaporation_rate: float = 0.05
+    tau_max: float = 10.0
+    tau_min: float = 0.01
 
     @classmethod
     def from_dict(cls, data: dict) -> "AlgorithmConfig":
@@ -271,37 +273,23 @@ class AlgorithmConfig(BaseConfig):
 
         # 处理简单字段
         simple_fields = [
-            "makespan_priority",
-            "score_priority",
-            "num_epsilon_points",
             "time_limit",
             "big_m",
             "max_iter",
-            "pop_size",
+            "enable_early_stop",
+            "max_not_improve_iter",
+            "early_stop_threshold",
             "crossover_prob",
             "mutation_prob",
             "alns_max_iter",
             "alns_segment_size",
             "destroy_degree_min",
             "destroy_degree_max",
-            "alns_initial_temp",
-            "alns_cooling_rate",
-            "alns_final_temp",
-            "alns_tabu_tenure",
-            "alns_enable_tabu",
-            "alns_iters_per_offspring",
-            "enable_alns_improvement",
-            "enable_hv_early_stopping",
-            "hv_improvement_threshold",
-            "hv_stagnation_limit",
+            "decay_rate",
         ]
         for field_name in simple_fields:
             if field_name in data:
                 kwargs[field_name] = data[field_name]
-
-        # 处理枚举字段
-        if "cooling_strategy" in data:
-            kwargs["cooling_strategy"] = CoolingStrategy(data["cooling_strategy"])
 
         # 处理嵌套对象
         if "obj_config" in data:
@@ -314,8 +302,6 @@ class AlgorithmConfig(BaseConfig):
             x <= 0
             for x in [
                 self.max_iter,
-                self.pop_size,
-                self.num_epsilon_points,
                 self.time_limit,
             ]
         ):
@@ -324,10 +310,6 @@ class AlgorithmConfig(BaseConfig):
             raise ValueError("Probabilities must be in [0, 1]")
         if not 0 < self.destroy_degree_min < self.destroy_degree_max <= 1:
             raise ValueError("Invalid destroy degree range")
-        if self.alns_initial_temp <= self.alns_final_temp:
-            raise ValueError("Initial temperature must be > final temperature")
-        if not 0 < self.alns_cooling_rate < 1:
-            raise ValueError("Cooling rate must be in (0, 1)")
 
 
 @dataclass
@@ -352,11 +334,9 @@ class Config(BaseConfig):
         str_info = (
             f"算例名称: {self.instance_param.name} "
             f"(需求点 = {self.instance_param.demand_num}个, "
-            f"Steiner点 = {self.instance_param.steiner_num}个, "
             f"地面车 = {self.instance_param.ground_veh_num}个, "
             f"无人机 = {self.instance_param.drone_num}个), "
             f"算法配置: 最大迭代 = {self.algorithm_config.max_iter}, "
-            f"种群规模 = {self.algorithm_config.pop_size}, "
             f"交叉概率 = {self.algorithm_config.crossover_prob}, "
             f"变异概率 = {self.algorithm_config.mutation_prob}"
         )

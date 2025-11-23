@@ -24,15 +24,28 @@ class Solution:
     routes: List[List[int]] = field(default_factory=list)
     coverage: Dict[Tuple[int, int], Set[int]] = field(default_factory=dict)
     objectives: List[float] = field(
-        default_factory=lambda: [float("inf"), float("inf")]
+        default_factory=lambda: [float("inf")]  # 默认单目标
     )
-    rank: int = -1
-    crowding_distance: float = 0.0
 
     def __post_init__(self):
         """初始化后处理,设置默认的routes"""
         if not self.routes:
             self.routes = [[] for _ in range(self.num_vehicles)]
+
+    @property
+    def num_objectives(self) -> int:
+        """返回目标函数的数量"""
+        return len(self.objectives)
+
+    @property
+    def is_single_objective(self) -> bool:
+        """判断是否为单目标问题"""
+        return len(self.objectives) == 1
+
+    @property
+    def is_multi_objective(self) -> bool:
+        """判断是否为多目标问题"""
+        return len(self.objectives) > 1
 
     def __str__(self):
         str_info = (
@@ -86,10 +99,6 @@ class Solution:
         # 保留已计算的目标函数值
         new_sol.objectives = self.objectives.copy()
 
-        # 重置种群相关属性（会随种群变化而变化）
-        new_sol.rank = -1
-        new_sol.crowding_distance = 0.0
-
         return new_sol
 
     def to_dict(self) -> Dict:
@@ -97,9 +106,6 @@ class Solution:
 
         mip_gap = "inf" if math.isinf(self.mip_gap) else self.mip_gap
         objectives = ["inf" if math.isinf(obj) else obj for obj in self.objectives]
-        crowding_distance = (
-            "inf" if math.isinf(self.crowding_distance) else self.crowding_distance
-        )
         return {
             "Solver_name": self.Solver_name,
             "status": self.status,
@@ -114,8 +120,6 @@ class Solution:
                 f"{k[0]}_{k[1]}": list(v) for k, v in self.coverage.items()
             },  # 转换为可序列化形式
             "objectives": objectives,
-            "rank": self.rank,
-            "crowding_distance": crowding_distance,
         }
 
     @classmethod
@@ -147,26 +151,35 @@ class Solution:
 
         # 确保 objectives 是 List[float]
         sol.objectives = [float(obj) for obj in data["objectives"]]
-        sol.rank = int(data["rank"])
-        sol.crowding_distance = float(data["crowding_distance"])
+
         return sol
 
     def _init_attrs(
         self,
         status="初始化属性",
+        num_objectives: int = 1,
     ):
-        """初始化解的属性"""
+        """初始化解的属性
+
+        Args:
+            status: 状态描述
+            num_objectives: 目标函数数量，默认为1（单目标）
+        """
         self.status = status
-        self.objectives = [float("inf"), float("inf")]
-        self.rank = -1
-        self.crowding_distance = 0.0
+        self.objectives = [0.0] * num_objectives
 
     def init_all_routes(
         self,
         status="初始化路径",
+        num_objectives: int = 1,
     ):
-        """初始化所有车辆的路径为起点和终点相同的空路径"""
-        self._init_attrs(status=status)
+        """初始化所有车辆的路径为起点和终点相同的空路径
+
+        Args:
+            status: 状态描述
+            num_objectives: 目标函数数量，默认为1（单目标）
+        """
+        self._init_attrs(status=status, num_objectives=num_objectives)
         self.routes = [[0, 0] for _ in range(self.num_vehicles)]
         self.coverage = {}  # 清空覆盖信息
 
@@ -178,4 +191,40 @@ class Solution:
         for vehicle_id, visit_node in self.coverage.keys():
             covered_nodes = self.coverage[(vehicle_id, visit_node)]
             included.update(covered_nodes)
+        included.discard(0)  # 移除起点/终点节点0
         return included
+
+    def get_route_signature(self) -> str:
+        """生成解的路径签名，用于快速比较解是否相同
+
+        Returns:
+            str: 包含所有路径的字符串签名
+        """
+        # 构建路径签名
+        route_parts = []
+        for veh_id, route in enumerate(self.routes):
+            route_str = f"V{veh_id}:[{','.join(map(str, route))}]"
+            route_parts.append(route_str)
+
+        signature = "|".join(route_parts)
+        return signature
+
+    def is_identical(self, other: "Solution") -> bool:
+        """判断两个解是否完全相同（只比较路径）
+
+        Args:
+            other: 待比较的解
+
+        Returns:
+            bool: 如果两个解的路径完全相同，返回True
+        """
+        # 快速检查：比较路径数量
+        if len(self.routes) != len(other.routes):
+            return False
+
+        # 比较每条路径
+        for i in range(len(self.routes)):
+            if self.routes[i] != other.routes[i]:
+                return False
+
+        return True

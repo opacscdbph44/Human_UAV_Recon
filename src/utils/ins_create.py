@@ -1,4 +1,5 @@
 import json
+import math
 import random
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,10 @@ def create_by_tsp(
         InstanceClass: 生成的算例实例对象
     """
 
+    # 设置随机种子以保证算例生成的可复现性
+    random.seed(42)
+    np.random.seed(42)
+
     instance_name = prob_config.instance_param.name
 
     # 读取.tsp文件，生成算例对象
@@ -44,19 +49,20 @@ def create_by_tsp(
         prob_config,
     )
 
+    # 执行需求点分组
+    demand_group_id = demand_grouping(demand_coords, prob_config)
+
     base_num = prob_config.instance_param.base_num
-    steiner_num = prob_config.instance_param.steiner_num
-    priority = [0] * base_num + demand_priority + [0] * steiner_num
-    accessible = [1] * base_num + demand_accessible + [1] * steiner_num
+    priority = [0] * base_num + demand_priority
+    accessible = [1] * base_num + demand_accessible
+    # 基地的group_id为-1，需求点使用分组结果
+    group_id = [-1] * base_num + demand_group_id
 
     #  确定基地坐标
     base_coords = base_selection(prob_config, demand_coords)
 
-    #  初始化Stiner点信息
-    stiner_coords = stiner_selection(prob_config, demand_coords)
-
     # 合并全体坐标信息
-    all_coords = base_coords + demand_coords + stiner_coords
+    all_coords = base_coords + demand_coords
 
     # 建立新的instance
     new_instance = InstanceClass.new_instance(
@@ -64,6 +70,7 @@ def create_by_tsp(
         all_coords,
         priority,
         accessible,
+        group_id,
     )
     print(
         f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}:"
@@ -342,63 +349,123 @@ def base_selection(
     return base_coords
 
 
-def stiner_selection(
-    prob_config: Config,
+def demand_grouping(
     demand_coords: list,
-) -> list:
-    stiner_coords: list = []
+    prob_config: Config,
+) -> list[int]:
+    """对需求点进行分组
 
-    steiner_num = prob_config.instance_param.steiner_num
-    steiner_mode = prob_config.instance_param.steiner_generation_mode
+    Args:
+        demand_coords: 需求点坐标列表
+        prob_config: 配置对象
 
-    coord_xs = [coord[0] for coord in demand_coords]
-    coord_ys = [coord[1] for coord in demand_coords]
-    min_x, max_x = min(coord_xs), max(coord_xs)
-    min_y, max_y = min(coord_ys), max(coord_ys)
+    Returns:
+        list[int]: 每个需求点的分组ID列表
+    """
+    grouping_method = prob_config.instance_param.grouping_method
+    demand_num = len(demand_coords)
 
-    if steiner_mode == "grid":
-        grid_size = prob_config.instance_param.steiner_grid_size
+    # 如果不分组，所有需求点属于同一组（组ID=0）
+    if grouping_method == "none":
+        return [0] * demand_num
 
-        # 计算网格间隔
-        x_step = (max_x - min_x) / (grid_size[0] + 1)
-        y_step = (max_y - min_y) / (grid_size[1] + 1)
+    # 转换为numpy数组便于计算
+    coords_np = np.array(demand_coords)
 
-        # 生成网格点，保留2位小数
-        for i in range(grid_size[0]):
-            for j in range(grid_size[1]):
-                x = round(min_x + (i + 1) * x_step, 2)
-                y = round(min_y + (j + 1) * y_step, 2)
-                stiner_coords.append((x, y))
-    elif steiner_mode == "assign":
-        assigned_coords = prob_config.instance_param.steiner_coords
-        if len(assigned_coords) != steiner_num:
-            error_msg = (
-                f"数量不符（{len(assigned_coords)} != {steiner_num}），"
-                "请检查prob_config.instance_param.steiner_coords参数！"
-            )
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {error_msg}")
-            raise ValueError(error_msg)
-        for coord in assigned_coords:
-            rel_x, rel_y = coord
-            # 将0-1范围内的相对坐标转换为实际坐标
-            abs_x = min_x + rel_x * (max_x - min_x)
-            abs_y = min_y + rel_y * (max_y - min_y)
-            stiner_coords.append((abs_x, abs_y))
-    elif steiner_mode == "kmeans":
-        demand_coords_np = np.array(demand_coords)
-        kmeans = KMeans(n_clusters=steiner_num, random_state=42)
-        centroids = kmeans.fit(demand_coords_np).cluster_centers_
-        stiner_coords = centroids.tolist()
-        stiner_coords = [tuple(coord) for coord in stiner_coords]
+    # 提取分组数量
+    num_groups = prob_config.instance_param.num_groups
+    max_group_size = prob_config.instance_param.max_group_demand
+    if num_groups == 0:
+        if demand_num >= 20:
+            num_groups = math.ceil(demand_num / max_group_size)
+        else:
+            num_groups = 4
+
+    # K-means聚类分组
+    if grouping_method == "kmeans":
+        # 确保分组数不超过需求点数
+        actual_groups = min(num_groups, demand_num)
+
+        if actual_groups <= 1:
+            return [0] * demand_num
+
+        kmeans = KMeans(n_clusters=actual_groups, random_state=42, n_init=10)
+        group_labels = kmeans.fit_predict(coords_np)
+        return group_labels.tolist()
+
+    # 网格分组
+    elif grouping_method == "grid":
+        grid_size = prob_config.instance_param.grid_size
+        grid_rows, grid_cols = grid_size
+
+        # 计算坐标范围
+        x_coords = coords_np[:, 0]
+        y_coords = coords_np[:, 1]
+        min_x, max_x = x_coords.min(), x_coords.max()
+        min_y, max_y = y_coords.min(), y_coords.max()
+
+        # 计算每个网格的宽度和高度
+        x_step = (max_x - min_x) / grid_cols if grid_cols > 0 else 1.0
+        y_step = (max_y - min_y) / grid_rows if grid_rows > 0 else 1.0
+
+        # 避免除零
+        if x_step == 0:
+            x_step = 1.0
+        if y_step == 0:
+            y_step = 1.0
+
+        # 为每个需求点分配网格ID
+        group_ids = []
+        for x, y in demand_coords:
+            col = min(int((x - min_x) / x_step), grid_cols - 1)
+            row = min(int((y - min_y) / y_step), grid_rows - 1)
+            grid_id = row * grid_cols + col
+            group_ids.append(grid_id)
+
+        return group_ids
+
+    # 基于距离阈值的分组（使用并查集）
+    elif grouping_method == "distance":
+        distance_threshold = prob_config.instance_param.distance_threshold
+
+        # 初始化并查集
+        parent = list(range(demand_num))
+
+        def find(x):
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        def union(x, y):
+            root_x = find(x)
+            root_y = find(y)
+            if root_x != root_y:
+                parent[root_x] = root_y
+
+        # 计算所有点对之间的距离并合并
+        for i in range(demand_num):
+            for j in range(i + 1, demand_num):
+                dist = np.linalg.norm(coords_np[i] - coords_np[j])
+                if dist <= distance_threshold:
+                    union(i, j)
+
+        # 获取最终的分组ID
+        group_ids = [find(i) for i in range(demand_num)]
+
+        # 重新映射为连续的分组ID
+        unique_groups = sorted(set(group_ids))
+        group_mapping = {old_id: new_id for new_id, old_id in enumerate(unique_groups)}
+        group_ids = [group_mapping[gid] for gid in group_ids]
+
+        return group_ids
+
     else:
         error_msg = (
-            f"不支持的Steiner点生成方式: {steiner_mode}，"
-            f"请检查prob_config.instance_param.steiner_generation_mode参数！"
+            f"不支持的分组方式: {grouping_method}，"
+            f"请检查prob_config.instance_param.grouping_method参数！"
         )
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {error_msg}")
         raise ValueError(error_msg)
-
-    return stiner_coords
 
 
 def save_instance(
@@ -412,7 +479,7 @@ def save_instance(
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_name = f"{time_str}.json"
     file_path = instance_folder / file_name
-    
+
     # 确保父文件夹存在,不存在则自动创建
     instance_folder.mkdir(parents=True, exist_ok=True)
 
